@@ -29,6 +29,7 @@ app.post('/save-recording', (req, res) => {
   execFile(ffmpegPath, [
     '-i', webmPath,
     '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+    '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',  // libx264 exige dimensions paires
     '-movflags', '+faststart',
     mp4Path
   ], (err, stdout, stderr) => {

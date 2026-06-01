@@ -256,8 +256,8 @@ function updateViewport() {
 }
 
 function resize() {
-  canvas.width  = window.innerWidth;
-  canvas.height = window.innerHeight;
+  canvas.width  = window.innerWidth  & ~1;  // toujours pair (libx264)
+  canvas.height = window.innerHeight & ~1;
   updateViewport();
 }
 window.addEventListener('resize', resize);
