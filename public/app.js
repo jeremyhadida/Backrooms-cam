@@ -1,10 +1,10 @@
 // Backrooms Cam — app.js
 const FILTER = {
-  grain:      0.18,  // intensité du grain analogique
-  vignette:   0.70,  // puissance de la vignette
-  scanlines:  0.35,  // opacité des scanlines CCTV
-  saturation: 0.65,  // multiplicateur désaturation globale (0=couleur, 1=gris total)
-  warmth:     0.15,  // (réservé — look intégré dans le shader)
+  grain:      0.25,  // intensité du grain analogique
+  vignette:   0.65,  // puissance de la vignette
+  scanlines:  0.50,  // opacité des scanlines CCTV
+  saturation: 0.82,  // désaturation globale (0=couleur pleine, 1=gris total)
+  warmth:     0.15,
 };
 
 // ── Shaders ──────────────────────────────────────────────────────────────────
@@ -52,7 +52,7 @@ void main() {
   }
 
   // Aberration chromatique horizontale (décalage luma/chroma VHS)
-  float ca = 0.0018;
+  float ca = 0.004;
   vec4 color;
   color.r = texture2D(u_texture, uv + vec2(ca,  0.0)).r;
   color.g = texture2D(u_texture, uv).g;
@@ -90,9 +90,9 @@ void main() {
 
   // Cast fluorescent backrooms (ombres verts/sales, temp +19)
   float shadowMask = 1.0 - smoothstep(0.0, 0.45, luma);
-  color.r += shadowMask * 0.012;
-  color.g += shadowMask * 0.022;  // pousse vert dans les ombres (fluo)
-  color.b -= shadowMask * 0.005;
+  color.r += shadowMask * 0.018;
+  color.g += shadowMask * 0.045;  // pousse vert dans les ombres (fluo)
+  color.b -= shadowMask * 0.012;
 
   // Bandes de tracking VHS (bruit horizontal animé)
   float trackY   = floor(uv.y * 90.0 + u_time * 7.0);
