@@ -79,6 +79,12 @@ const canvas = document.getElementById('canvas');
 const gl     = canvas.getContext('webgl');
 const video  = document.getElementById('video');
 
+if (!gl) {
+  document.getElementById('toast').textContent = 'WebGL non disponible — activer WebGL dans le navigateur';
+  document.getElementById('toast').classList.add('show');
+  throw new Error('WebGL not supported');
+}
+
 function compileShader(type, src) {
   const s = gl.createShader(type);
   gl.shaderSource(s, src);
@@ -92,6 +98,8 @@ const prog = gl.createProgram();
 gl.attachShader(prog, compileShader(gl.VERTEX_SHADER,   VERT_SRC));
 gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FRAG_SRC));
 gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+  throw new Error(gl.getProgramInfoLog(prog));
 gl.useProgram(prog);
 
 // Quad plein écran (2 triangles)
@@ -132,21 +140,36 @@ gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
+function showToast(msg, duration = 4000) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), duration);
+}
+
 // ── Caméra ────────────────────────────────────────────────────────────────────
 
 let currentDeviceId = localStorage.getItem('deviceId') || null;
 
 async function startCamera(deviceId) {
   if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
-  const constraints = {
-    video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' },
-    audio: false,
-  };
-  const stream = await navigator.mediaDevices.getUserMedia(constraints);
-  video.srcObject = stream;
-  await video.play();
-  currentDeviceId = stream.getVideoTracks()[0].getSettings().deviceId;
-  localStorage.setItem('deviceId', currentDeviceId);
+  try {
+    const constraints = {
+      video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' },
+      audio: false,
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    await video.play();
+    currentDeviceId = stream.getVideoTracks()[0].getSettings().deviceId;
+    localStorage.setItem('deviceId', currentDeviceId);
+  } catch (err) {
+    if (deviceId && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')) {
+      localStorage.removeItem('deviceId');
+      return startCamera(null);
+    }
+    throw err;
+  }
 }
 
 async function populateCameraList() {
@@ -163,7 +186,7 @@ async function populateCameraList() {
 }
 
 document.getElementById('camera-select').addEventListener('change', e => {
-  startCamera(e.target.value);
+  startCamera(e.target.value).catch(err => showToast(`Erreur caméra : ${err.message}`));
 });
 
 // ── Boucle de rendu ───────────────────────────────────────────────────────────
@@ -189,7 +212,11 @@ function render(time) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 (async () => {
-  await startCamera(currentDeviceId);
-  await populateCameraList();
-  requestAnimationFrame(render);
+  try {
+    await startCamera(currentDeviceId);
+    await populateCameraList();
+    requestAnimationFrame(render);
+  } catch (err) {
+    showToast(`Erreur : ${err.message || 'Impossible d\'accéder à la caméra'}`, 8000);
+  }
 })();
