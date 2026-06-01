@@ -364,6 +364,13 @@ const btnRec      = document.getElementById('btn-rec');
 
 async function saveRecording() {
   const blob = new Blob(recChunks, { type: 'video/webm' });
+  console.log(`[REC] chunks: ${recChunks.length}, blob: ${blob.size} bytes`);
+
+  if (blob.size < 1000) {
+    showToast(`Enregistrement vide (${blob.size} octets) — WebGL preserveDrawingBuffer?`, 7000);
+    return;
+  }
+
   showToast('Conversion en cours…');
   try {
     const res  = await fetch('/save-recording', {
@@ -372,10 +379,11 @@ async function saveRecording() {
       body: blob,
     });
     const data = await res.json();
-    if (data.error) throw new Error(data.error);
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
     showToast(`✓ Enregistré : ${data.filename}`);
   } catch (err) {
-    showToast(`Erreur enregistrement : ${err.message}`, 6000);
+    console.error('[REC] erreur:', err);
+    showToast(`Erreur : ${err.message}`, 8000);
   }
 }
 
