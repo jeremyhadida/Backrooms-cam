@@ -1,10 +1,10 @@
 // Backrooms Cam — app.js
 const FILTER = {
-  grain:      0.14,
-  vignette:   0.88,
-  scanlines:  0.22,
-  saturation: 0.25,
-  warmth:     0.18,
+  grain:      0.18,  // intensité du grain analogique
+  vignette:   0.70,  // puissance de la vignette
+  scanlines:  0.35,  // opacité des scanlines CCTV
+  saturation: 0.65,  // multiplicateur désaturation globale (0=couleur, 1=gris total)
+  warmth:     0.15,  // (réservé — look intégré dans le shader)
 };
 
 // ── Shaders ──────────────────────────────────────────────────────────────────
@@ -33,37 +33,80 @@ float rand(vec2 co) {
   return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
+float sCurve(float v) {
+  v = clamp(v, 0.0, 1.0);
+  return v * v * (3.0 - 2.0 * v);
+}
+
 void main() {
   vec2 uv = v_texCoord;
 
-  // Légère distorsion barrel (style CRT)
+  // Distorsion barrel (lentille caméra cheap)
   vec2 centered = uv - 0.5;
   float dist = dot(centered, centered);
   uv += centered * dist * 0.04;
 
-  // Sortir du canvas = noir
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
     return;
   }
 
-  vec4 color = texture2D(u_texture, uv);
+  // Aberration chromatique horizontale (décalage luma/chroma VHS)
+  float ca = 0.0018;
+  vec4 color;
+  color.r = texture2D(u_texture, uv + vec2(ca,  0.0)).r;
+  color.g = texture2D(u_texture, uv).g;
+  color.b = texture2D(u_texture, uv - vec2(ca * 0.6, 0.0)).b;
+  color.a = 1.0;
 
-  // Désaturation
   float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-  color.rgb = mix(color.rgb, vec3(luma), 1.0 - u_saturation);
+  vec3 gray  = vec3(luma);
 
-  // Teinte chaude ambre
-  color.r += u_warmth * luma * 0.6;
-  color.g += u_warmth * luma * 0.25;
+  // Désaturation sélective (look Backrooms/Lightroom):
+  // Rouges -94%, Oranges -95%, Cyan -100%, Verts +17%
+  float redness  = max(0.0, color.r - max(color.g, color.b));
+  float cyanness = max(0.0, min(color.g, color.b) - color.r);
+  float greenBoost = max(0.0, color.g - max(color.r, color.b));
+  color.rgb = mix(color.rgb, gray, clamp(redness  * 5.5, 0.0, 0.94));
+  color.rgb = mix(color.rgb, gray, clamp(cyanness * 5.0, 0.0, 1.0));
+  color.rgb = mix(color.rgb, color.rgb + vec3(-0.01, 0.02, -0.01), clamp(greenBoost * 3.0, 0.0, 1.0));
 
-  // Scanlines
-  float line = sin(uv.y * 800.0) * 0.5 + 0.5;
-  color.rgb *= 1.0 - u_scanlines * (1.0 - line);
+  // Désaturation globale (Vibrance -45, Saturation -30 → ~35% sat résiduelle)
+  color.rgb = mix(gray, color.rgb, 1.0 - u_saturation);
 
-  // Grain animé
-  float noise = rand(uv + fract(u_time * 13.7));
-  color.rgb += (noise - 0.5) * u_grain;
+  // Contraste élevé (+48) via S-curve + exposition -0.23
+  color.rgb *= 0.95;
+  color.rgb = vec3(
+    sCurve(color.rgb.r * 1.22 - 0.10),
+    sCurve(color.rgb.g * 1.22 - 0.10),
+    sCurve(color.rgb.b * 1.22 - 0.10)
+  );
+
+  // Highlight rolloff (-80 highlights, -55 whites) — filmic
+  color.rgb = color.rgb / (color.rgb + vec3(0.25)) * 1.25;
+
+  // Blacks crush (-25 blacks)
+  color.rgb = max(color.rgb - vec3(0.032), vec3(0.0));
+
+  // Cast fluorescent backrooms (ombres verts/sales, temp +19)
+  float shadowMask = 1.0 - smoothstep(0.0, 0.45, luma);
+  color.r += shadowMask * 0.012;
+  color.g += shadowMask * 0.022;  // pousse vert dans les ombres (fluo)
+  color.b -= shadowMask * 0.005;
+
+  // Bandes de tracking VHS (bruit horizontal animé)
+  float trackY   = floor(uv.y * 90.0 + u_time * 7.0);
+  float tracking = rand(vec2(trackY, u_time * 0.3)) * 0.028;
+  color.rgb += tracking * (1.0 - luma) * 0.6;
+
+  // Scanlines CCTV fines
+  float scanline = sin(uv.y * 580.0 * 3.14159) * 0.5 + 0.5;
+  color.rgb *= 1.0 - u_scanlines * (1.0 - scanline) * 0.65;
+
+  // Grain analogique (plus fort dans les ombres — capteur CCD)
+  float noise = rand(uv * vec2(1366.0, 768.0) + fract(u_time * 19.7)) - 0.5;
+  float shadowBoost = 1.0 + (1.0 - luma) * 1.8;
+  color.rgb += noise * u_grain * shadowBoost;
 
   // Vignette
   vec2 v = uv * (1.0 - uv.yx);
@@ -76,7 +119,7 @@ void main() {
 // ── WebGL setup ───────────────────────────────────────────────────────────────
 
 const canvas = document.getElementById('canvas');
-const gl     = canvas.getContext('webgl');
+const gl     = canvas.getContext('webgl', { preserveDrawingBuffer: true });  // requis pour captureStream
 const video  = document.getElementById('video');
 
 if (!gl) {
@@ -131,6 +174,7 @@ gl.uniform1f(uVignette,   FILTER.vignette);
 gl.uniform1f(uScanlines,  FILTER.scanlines);
 gl.uniform1f(uSaturation, FILTER.saturation);
 gl.uniform1f(uWarmth,     FILTER.warmth);
+gl.clearColor(0, 0, 0, 1);
 
 // Texture webcam
 const texture = gl.createTexture();
@@ -163,6 +207,7 @@ async function startCamera(deviceId) {
     await video.play();
     currentDeviceId = stream.getVideoTracks()[0].getSettings().deviceId;
     localStorage.setItem('deviceId', currentDeviceId);
+    updateViewport();
   } catch (err) {
     if (deviceId && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')) {
       localStorage.removeItem('deviceId');
@@ -191,15 +236,35 @@ document.getElementById('camera-select').addEventListener('change', e => {
 
 // ── Boucle de rendu ───────────────────────────────────────────────────────────
 
+function updateViewport() {
+  const cw = canvas.width, ch = canvas.height;
+  const vw = video.videoWidth  || cw;
+  const vh = video.videoHeight || ch;
+  const camRatio = vw / vh;
+  const winRatio = cw / ch;
+  if (winRatio > camRatio) {
+    // Fenêtre plus large → pillarbox
+    const vpH = ch;
+    const vpW = Math.round(vpH * camRatio);
+    gl.viewport(Math.round((cw - vpW) / 2), 0, vpW, vpH);
+  } else {
+    // Fenêtre plus haute → letterbox
+    const vpW = cw;
+    const vpH = Math.round(vpW / camRatio);
+    gl.viewport(0, Math.round((ch - vpH) / 2), vpW, vpH);
+  }
+}
+
 function resize() {
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
-  gl.viewport(0, 0, canvas.width, canvas.height);
+  updateViewport();
 }
 window.addEventListener('resize', resize);
 resize();
 
 function render(time) {
+  gl.clear(gl.COLOR_BUFFER_BIT);
   if (video.readyState >= 2) {
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
