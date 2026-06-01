@@ -18,9 +18,9 @@ html, body {
 /* HUD */
 #hud {
   position: fixed;
-  inset: 0;
   pointer-events: none;
   z-index: 10;
+  /* left/top/width/height gérés par positionOverlays() en JS */
 }
 
 #hud-topleft {
@@ -53,8 +53,7 @@ html, body {
 /* Contrôles flottants */
 #controls {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
+  /* bottom/right gérés par positionOverlays() en JS */
   display: flex;
   align-items: center;
   gap: 10px;

@@ -193,6 +193,7 @@ function showToast(msg, duration = 4000) {
 
 // ── Caméra ────────────────────────────────────────────────────────────────────
 
+let vpRect = { x: 0, y: 0, w: 0, h: 0 };
 let currentDeviceId = localStorage.getItem('deviceId') || null;
 
 async function startCamera(deviceId) {
@@ -242,17 +243,30 @@ function updateViewport() {
   const vh = video.videoHeight || ch;
   const camRatio = vw / vh;
   const winRatio = cw / ch;
+  let vpX, vpY, vpW, vpH;
   if (winRatio > camRatio) {
-    // Fenêtre plus large → pillarbox
-    const vpH = ch;
-    const vpW = Math.round(vpH * camRatio);
-    gl.viewport(Math.round((cw - vpW) / 2), 0, vpW, vpH);
+    vpH = ch; vpW = Math.round(vpH * camRatio);
+    vpX = Math.round((cw - vpW) / 2); vpY = 0;
   } else {
-    // Fenêtre plus haute → letterbox
-    const vpW = cw;
-    const vpH = Math.round(vpW / camRatio);
-    gl.viewport(0, Math.round((ch - vpH) / 2), vpW, vpH);
+    vpW = cw; vpH = Math.round(vpW / camRatio);
+    vpX = 0; vpY = Math.round((ch - vpH) / 2);
   }
+  gl.viewport(vpX, vpY, vpW, vpH);
+  vpRect = { x: vpX, y: vpY, w: vpW, h: vpH };
+  positionOverlays();
+}
+
+function positionOverlays() {
+  const hud = document.getElementById('hud');
+  hud.style.left   = vpRect.x + 'px';
+  hud.style.top    = vpRect.y + 'px';
+  hud.style.width  = vpRect.w + 'px';
+  hud.style.height = vpRect.h + 'px';
+
+  // Contrôles : 20px depuis le coin bas-droit de la zone vidéo
+  const ctrl = document.getElementById('controls');
+  ctrl.style.right  = (canvas.width  - vpRect.x - vpRect.w + 20) + 'px';
+  ctrl.style.bottom = (canvas.height - vpRect.y - vpRect.h + 20) + 'px';
 }
 
 function resize() {
