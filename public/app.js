@@ -270,3 +270,23 @@ camIdEl.addEventListener('click', () => {
   input.addEventListener('blur', save);
   input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
 });
+
+// ── Contrôles flottants ───────────────────────────────────────────────────────
+
+const controls = document.getElementById('controls');
+let hideTimer  = null;
+
+function showControls() {
+  controls.classList.add('visible');
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => controls.classList.remove('visible'), 3000);
+}
+
+document.addEventListener('mousemove', showControls);
+document.addEventListener('touchstart', showControls);
+
+// Sélecteur caméra (toggle)
+document.getElementById('btn-camera').addEventListener('click', () => {
+  document.getElementById('ctrl-camera').classList.toggle('open');
+  clearTimeout(hideTimer);
+});
