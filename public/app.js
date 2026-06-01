@@ -1,9 +1,9 @@
 // Backrooms Cam — app.js
 const FILTER = {
-  grain:      0.25,  // intensité du grain analogique
-  vignette:   0.65,  // puissance de la vignette
-  scanlines:  0.50,  // opacité des scanlines CCTV
-  saturation: 0.82,  // désaturation globale (0=couleur pleine, 1=gris total)
+  grain:      0.16,  // grain analogique
+  vignette:   0.55,  // vignette
+  scanlines:  0.28,  // scanlines CCTV
+  saturation: 0.40,  // désaturation globale (0=couleur, 1=gris total)
   warmth:     0.15,
 };
 
@@ -41,10 +41,10 @@ float sCurve(float v) {
 void main() {
   vec2 uv = v_texCoord;
 
-  // Distorsion barrel (lentille caméra cheap)
+  // Distorsion barrel légère (lentille caméra bon marché)
   vec2 centered = uv - 0.5;
   float dist = dot(centered, centered);
-  uv += centered * dist * 0.04;
+  uv += centered * dist * 0.025;
 
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
@@ -52,63 +52,67 @@ void main() {
   }
 
   // Aberration chromatique horizontale (décalage luma/chroma VHS)
-  float ca = 0.004;
+  float ca = 0.0025;
   vec4 color;
   color.r = texture2D(u_texture, uv + vec2(ca,  0.0)).r;
   color.g = texture2D(u_texture, uv).g;
-  color.b = texture2D(u_texture, uv - vec2(ca * 0.6, 0.0)).b;
+  color.b = texture2D(u_texture, uv - vec2(ca * 0.5, 0.0)).b;
   color.a = 1.0;
 
   float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
   vec3 gray  = vec3(luma);
 
-  // Désaturation sélective (look Backrooms/Lightroom):
-  // Rouges -94%, Oranges -95%, Cyan -100%, Verts +17%
+  // ── Désaturation sélective (palette Backrooms) ────────────────────────────
+  // Rouges/oranges → gris (peaux, teintes chaudes non-jaunes)
   float redness  = max(0.0, color.r - max(color.g, color.b));
-  float cyanness = max(0.0, min(color.g, color.b) - color.r);
-  float greenBoost = max(0.0, color.g - max(color.r, color.b));
-  color.rgb = mix(color.rgb, gray, clamp(redness  * 5.5, 0.0, 0.94));
-  color.rgb = mix(color.rgb, gray, clamp(cyanness * 5.0, 0.0, 1.0));
-  color.rgb = mix(color.rgb, color.rgb + vec3(-0.01, 0.02, -0.01), clamp(greenBoost * 3.0, 0.0, 1.0));
+  // Cyans/bleus → gris (les backrooms n'ont pas de bleu froid)
+  float cyanblue = max(0.0, color.b - color.r * 0.8);
+  color.rgb = mix(color.rgb, gray, clamp(redness  * 5.0, 0.0, 0.88));
+  color.rgb = mix(color.rgb, gray, clamp(cyanblue * 4.0, 0.0, 0.90));
 
-  // Désaturation globale (Vibrance -45, Saturation -30 → ~35% sat résiduelle)
+  // ── Désaturation globale modérée — conserver les jaunes! ─────────────────
+  // (Lightroom: Vibrance -45, Sat -30 → ~55% de sat résiduelle)
+  luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+  gray = vec3(luma);
   color.rgb = mix(gray, color.rgb, 1.0 - u_saturation);
 
-  // Contraste élevé (+48) via S-curve + exposition -0.23
-  color.rgb *= 0.95;
+  // ── Cast chaud jaune-ambre (signature Backrooms) ──────────────────────────
+  // Fluorescent incandescent : boost R+G, réduction forte du bleu
+  color.r *= 1.06;
+  color.g *= 1.01;
+  color.b *= 0.72;
+  // Normaliser pour éviter le clipping
+  float mx = max(color.r, max(color.g, color.b));
+  if (mx > 1.0) color.rgb /= mx;
+
+  // ── Courbe tonale caméra de surveillance ──────────────────────────────────
+  // Noirs légèrement levés (pas de vrai noir sur un capteur CCD bon marché)
+  color.rgb = color.rgb * 0.92 + 0.03;
+  // Contraste via S-curve
   color.rgb = vec3(
-    sCurve(color.rgb.r * 1.22 - 0.10),
-    sCurve(color.rgb.g * 1.22 - 0.10),
-    sCurve(color.rgb.b * 1.22 - 0.10)
+    sCurve(color.rgb.r * 1.16 - 0.07),
+    sCurve(color.rgb.g * 1.16 - 0.07),
+    sCurve(color.rgb.b * 1.16 - 0.07)
   );
 
-  // Highlight rolloff (-80 highlights, -55 whites) — filmic
-  color.rgb = color.rgb / (color.rgb + vec3(0.25)) * 1.25;
+  // ── Highlight rolloff (capteur saturé) ───────────────────────────────────
+  color.rgb = color.rgb / (color.rgb + vec3(0.20)) * 1.20;
 
-  // Blacks crush (-25 blacks)
-  color.rgb = max(color.rgb - vec3(0.032), vec3(0.0));
+  // ── Bandes de tracking VHS (bruit horizontal animé) ──────────────────────
+  float trackY   = floor(uv.y * 75.0 + u_time * 5.0);
+  float tracking = rand(vec2(trackY, u_time * 0.2)) * 0.020;
+  color.rgb += tracking * (1.0 - luma) * 0.5;
 
-  // Cast fluorescent backrooms (ombres verts/sales, temp +19)
-  float shadowMask = 1.0 - smoothstep(0.0, 0.45, luma);
-  color.r += shadowMask * 0.018;
-  color.g += shadowMask * 0.045;  // pousse vert dans les ombres (fluo)
-  color.b -= shadowMask * 0.012;
+  // ── Scanlines CCTV fines ──────────────────────────────────────────────────
+  float scanline = sin(uv.y * 560.0 * 3.14159) * 0.5 + 0.5;
+  color.rgb *= 1.0 - u_scanlines * (1.0 - scanline) * 0.55;
 
-  // Bandes de tracking VHS (bruit horizontal animé)
-  float trackY   = floor(uv.y * 90.0 + u_time * 7.0);
-  float tracking = rand(vec2(trackY, u_time * 0.3)) * 0.028;
-  color.rgb += tracking * (1.0 - luma) * 0.6;
-
-  // Scanlines CCTV fines
-  float scanline = sin(uv.y * 580.0 * 3.14159) * 0.5 + 0.5;
-  color.rgb *= 1.0 - u_scanlines * (1.0 - scanline) * 0.65;
-
-  // Grain analogique (plus fort dans les ombres — capteur CCD)
-  float noise = rand(uv * vec2(1366.0, 768.0) + fract(u_time * 19.7)) - 0.5;
-  float shadowBoost = 1.0 + (1.0 - luma) * 1.8;
+  // ── Grain analogique (capteur CCD — plus fort dans les ombres) ───────────
+  float noise = rand(uv * vec2(1366.0, 768.0) + fract(u_time * 17.3)) - 0.5;
+  float shadowBoost = 1.0 + (1.0 - luma) * 1.4;
   color.rgb += noise * u_grain * shadowBoost;
 
-  // Vignette
+  // ── Vignette ──────────────────────────────────────────────────────────────
   vec2 v = uv * (1.0 - uv.yx);
   float vig = pow(v.x * v.y * 15.0, u_vignette);
   color.rgb *= vig;
