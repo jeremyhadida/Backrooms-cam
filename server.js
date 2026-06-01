@@ -8,15 +8,18 @@ const app = express();
 const PORT = 3000;
 const RECORDINGS_DIR = path.join(__dirname, 'recordings');
 
-if (!fs.existsSync(RECORDINGS_DIR)) fs.mkdirSync(RECORDINGS_DIR);
+fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/save-recording', express.raw({ type: 'video/webm', limit: '2gb' }));
 
 app.post('/save-recording', (req, res) => {
-  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
   const webmPath = path.join(RECORDINGS_DIR, `${ts}.webm`);
   const mp4Path  = path.join(RECORDINGS_DIR, `${ts}.mp4`);
+
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0)
+    return res.status(400).json({ error: 'missing or invalid body' });
 
   fs.writeFileSync(webmPath, req.body);
 
@@ -26,7 +29,7 @@ app.post('/save-recording', (req, res) => {
     '-movflags', '+faststart',
     mp4Path
   ], (err) => {
-    fs.unlinkSync(webmPath);
+    try { fs.unlinkSync(webmPath); } catch (_) {}
     if (err) return res.status(500).json({ error: err.message });
     res.json({ filename: path.basename(mp4Path) });
   });
