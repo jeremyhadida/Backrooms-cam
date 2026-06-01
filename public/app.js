@@ -235,6 +235,62 @@ function showToast(msg, duration = 4000) {
   setTimeout(() => toast.classList.remove('show'), duration);
 }
 
+// ── Canvas 2D de composition (WebGL + HUD) pour l'enregistrement ─────────────
+
+const recCanvas = document.createElement('canvas');
+const recCtx    = recCanvas.getContext('2d');
+
+function syncRecCanvas() {
+  recCanvas.width  = canvas.width;
+  recCanvas.height = canvas.height;
+}
+
+function hudLabel(ctx, text, x, y) {
+  const W = ctx.measureText(text).width + 10;
+  ctx.fillStyle = 'rgba(0,0,0,0.80)';
+  ctx.fillRect(x, y, W, 24);
+  ctx.fillStyle = '#9aad6a';
+  ctx.textAlign = 'left';
+  ctx.fillText(text, x + 5, y + 2);
+}
+
+function hudLabelRight(ctx, text, rx, y) {
+  const W = ctx.measureText(text).width + 10;
+  ctx.fillStyle = 'rgba(0,0,0,0.80)';
+  ctx.fillRect(rx - W, y, W, 24);
+  ctx.fillStyle = '#9aad6a';
+  ctx.textAlign = 'right';
+  ctx.fillText(text, rx - 5, y + 2);
+  ctx.textAlign = 'left';
+}
+
+function drawHUDOnCanvas(ctx) {
+  ctx.font         = '18px "VT323", monospace';
+  ctx.textBaseline = 'top';
+  const { x: vx, y: vy, w: vw, h: vh } = vpRect;
+  const pad  = 10;
+  const line = 24;
+
+  // Top-left : cam-id / cam-level / cam-location
+  hudLabel(ctx, document.getElementById('cam-id')?.textContent       || 'CAMERA 07',     vx + pad, vy + pad);
+  hudLabel(ctx, document.getElementById('cam-level')?.textContent    || 'LEVEL 2',        vx + pad, vy + pad + line);
+  hudLabel(ctx, document.getElementById('cam-location')?.textContent || 'THE BACKROOMS', vx + pad, vy + pad + line * 2);
+
+  // Top-right : date / heure
+  const rx = vx + vw - pad;
+  hudLabelRight(ctx, document.getElementById('hud-date')?.textContent || '', rx, vy + pad);
+  hudLabelRight(ctx, document.getElementById('hud-time')?.textContent || '', rx, vy + pad + line);
+
+  // Bottom-left : statut
+  hudLabel(ctx, document.getElementById('rec-status')?.textContent || 'STATUS: MONITORING', vx + pad, vy + vh - pad - 24);
+}
+
+function compositeFrame() {
+  recCtx.clearRect(0, 0, recCanvas.width, recCanvas.height);
+  recCtx.drawImage(canvas, 0, 0);  // copie le canvas WebGL
+  drawHUDOnCanvas(recCtx);
+}
+
 // ── Caméra ────────────────────────────────────────────────────────────────────
 
 let vpRect = { x: 0, y: 0, w: 0, h: 0 };
@@ -312,6 +368,7 @@ function positionOverlays() {
 function resize() {
   canvas.width  = window.innerWidth  & ~1;
   canvas.height = window.innerHeight & ~1;
+  syncRecCanvas();
   updateViewport();
 }
 window.addEventListener('resize', resize);
@@ -323,6 +380,8 @@ const TARGET_FPS    = 15;
 const FRAME_MS      = 1000 / TARGET_FPS;
 let   lastFrameTime = 0;
 
+let isRecording = false;
+
 function render(now) {
   requestAnimationFrame(render);
   if (now - lastFrameTime < FRAME_MS) return;
@@ -333,6 +392,7 @@ function render(now) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
     gl.uniform1f(uTime, now * 0.001);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+    if (isRecording) compositeFrame();
   }
 }
 
@@ -449,7 +509,8 @@ async function saveRecording() {
 }
 
 function startRecording() {
-  const stream   = canvas.captureStream(TARGET_FPS);
+  syncRecCanvas();
+  const stream   = recCanvas.captureStream(TARGET_FPS);  // composite WebGL + HUD
   const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
     ? 'video/webm;codecs=vp9' : 'video/webm';
   mediaRecorder = new MediaRecorder(stream, { mimeType });
@@ -457,12 +518,14 @@ function startRecording() {
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
   mediaRecorder.onstop          = saveRecording;
   mediaRecorder.start(1000);
+  isRecording = true;
   btnRec.classList.add('recording');
   recStatus.textContent = 'STATUS: RECORDING';
   showToast('⏺ Enregistrement démarré');
 }
 
 function stopRecording() {
+  isRecording = false;
   mediaRecorder.stop();
   btnRec.classList.remove('recording');
   recStatus.textContent = 'STATUS: MONITORING';
