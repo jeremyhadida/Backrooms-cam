@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Backrooms Cam</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <!-- HUD overlay -->
+  <div id="hud">
+    <div id="hud-topleft">
+      <span id="cam-id">CAM-01</span>
+      <span id="hud-date">01/01/2026</span>
+      <span id="hud-time">00:00:00.00</span>
+    </div>
+  </div>
+
+  <!-- Contrôles flottants -->
+  <div id="controls">
+    <div id="ctrl-camera">
+      <button id="btn-camera" title="Changer de caméra">⚙</button>
+      <select id="camera-select"></select>
+    </div>
+    <button id="btn-rec" title="Enregistrer">⏺</button>
+  </div>
+
+  <!-- Toast notification -->
+  <div id="toast"></div>
+
+  <!-- Vidéo source (masquée) -->
+  <video id="video" autoplay playsinline muted></video>
+
+  <script src="app.js"></script>
+</body>
+</html>
