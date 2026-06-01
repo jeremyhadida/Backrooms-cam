@@ -290,3 +290,54 @@ document.getElementById('btn-camera').addEventListener('click', () => {
   document.getElementById('ctrl-camera').classList.toggle('open');
   clearTimeout(hideTimer);
 });
+
+// ── Enregistrement ────────────────────────────────────────────────────────────
+
+let mediaRecorder = null;
+let recChunks     = [];
+const btnRec      = document.getElementById('btn-rec');
+
+async function saveRecording() {
+  const blob = new Blob(recChunks, { type: 'video/webm' });
+  showToast('Conversion en cours…');
+  try {
+    const res  = await fetch('/save-recording', {
+      method: 'POST',
+      headers: { 'Content-Type': 'video/webm' },
+      body: blob,
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    showToast(`✓ Enregistré : ${data.filename}`);
+  } catch (err) {
+    showToast(`Erreur enregistrement : ${err.message}`, 6000);
+  }
+}
+
+function startRecording() {
+  const stream   = canvas.captureStream(30);
+  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+    ? 'video/webm;codecs=vp9'
+    : 'video/webm';
+  mediaRecorder = new MediaRecorder(stream, { mimeType });
+  recChunks     = [];
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
+  mediaRecorder.onstop          = saveRecording;
+  mediaRecorder.start(1000);
+  btnRec.classList.add('recording');
+  showToast('⏺ Enregistrement démarré');
+}
+
+function stopRecording() {
+  mediaRecorder.stop();
+  btnRec.classList.remove('recording');
+}
+
+btnRec.addEventListener('click', () => {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+  showControls();
+});
