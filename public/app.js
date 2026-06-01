@@ -220,3 +220,53 @@ function render(time) {
     showToast(`Erreur : ${err.message || 'Impossible d\'accéder à la caméra'}`, 8000);
   }
 })();
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+
+function pad(n, w = 2) { return String(n).padStart(w, '0'); }
+
+function updateHUD() {
+  const d  = new Date();
+  const mm = pad(d.getMonth() + 1), dd = pad(d.getDate()), yyyy = d.getFullYear();
+  const hh = pad(d.getHours()), mi = pad(d.getMinutes()), ss = pad(d.getSeconds());
+  const cs = pad(Math.floor(d.getMilliseconds() / 10));
+  document.getElementById('hud-date').textContent = `${mm}/${dd}/${yyyy}`;
+  document.getElementById('hud-time').textContent = `${hh}:${mi}:${ss}.${cs}`;
+}
+setInterval(updateHUD, 50);
+updateHUD();
+
+// Identifiant caméra — restaurer depuis localStorage
+const camIdEl = document.getElementById('cam-id');
+camIdEl.textContent = localStorage.getItem('camId') || 'CAM-01';
+
+camIdEl.addEventListener('click', () => {
+  const current = camIdEl.textContent;
+  const input   = document.createElement('input');
+  input.value   = current;
+  input.style.cssText = [
+    'background:transparent',
+    'border:none',
+    'border-bottom:1px solid #aaa',
+    'color:#ddddc8',
+    'font-family:inherit',
+    'font-size:inherit',
+    'font-weight:bold',
+    'letter-spacing:1.5px',
+    'outline:none',
+    'width:180px',
+  ].join(';');
+
+  camIdEl.textContent = '';
+  camIdEl.appendChild(input);
+  input.focus();
+  input.select();
+
+  function save() {
+    const val = input.value.trim() || current;
+    camIdEl.textContent = val;
+    localStorage.setItem('camId', val);
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
+});
