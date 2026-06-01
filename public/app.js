@@ -94,15 +94,15 @@ void main() {
   color.rgb = mix(color.rgb, texture2D(u_texture, blockUV).rgb, 0.10);
   color.rgb += (blockRnd - 0.5) * 0.025;
 
-  // ── 8. Shadow Crush (+15%) ───────────────────────────────────────────────
-  color.rgb = max(color.rgb - vec3(0.038), vec3(0.0)) / (1.0 - 0.038);
+  // ── 8. Shadow Crush (adouci — préserver le détail dans les ombres) ────────
+  color.rgb = max(color.rgb - vec3(0.012), vec3(0.0)) / (1.0 - 0.012);
 
   // ── 9. Highlight Clip (+20%) ─────────────────────────────────────────────
-  color.rgb = min(color.rgb, vec3(0.85)) / 0.85;
+  color.rgb = min(color.rgb, vec3(0.88)) / 0.88;
 
-  // ── 10. Brightness -10%, Contrast +20%, Gamma 0.9 ────────────────────────
-  color.rgb *= 0.90;
-  color.rgb  = (color.rgb - 0.5) * 1.20 + 0.5;
+  // ── 10. Brightness -10%, Contrast +12% (adouci), Gamma 0.9 ──────────────
+  color.rgb *= 0.92;
+  color.rgb  = (color.rgb - 0.5) * 1.12 + 0.5;
   color.rgb  = clamp(color.rgb, 0.0, 1.0);
   color.rgb  = pow(color.rgb, vec3(1.0 / 0.9));
 
