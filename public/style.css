@@ -4,7 +4,6 @@ html, body {
   width: 100%; height: 100%;
   background: #000;
   overflow: hidden;
-  font-family: 'Courier New', Courier, monospace;
 }
 
 #canvas {
@@ -15,45 +14,66 @@ html, body {
 
 #video { display: none; }
 
-/* HUD */
+/* ── HUD ──────────────────────────────────────────────────────────────────── */
+
 #hud {
   position: fixed;
   pointer-events: none;
   z-index: 10;
-  /* left/top/width/height gérés par positionOverlays() en JS */
+  font-family: 'VT323', 'Courier New', monospace;
 }
 
+/* Fond noir par ligne de texte — ajusté à la largeur du texte */
+#hud span {
+  display: inline-block;
+  background: rgba(0, 0, 0, 0.80);
+  color: #9aad6a;        /* olive green — #7B8D4D éclairci pour lisibilité */
+  font-size: 18px;
+  letter-spacing: 1px;
+  padding: 0px 5px 1px;
+  align-self: flex-start;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+/* Top Left */
 #hud-topleft {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  top: 10px;
+  left: 10px;
   display: flex;
   flex-direction: column;
   gap: 0;
   pointer-events: auto;
 }
 
-#hud-topleft span {
-  display: inline-block;
-  background: rgba(0, 0, 0, 0.85);
-  color: #ddddc8;
-  font-size: 13px;
-  font-weight: bold;
-  letter-spacing: 1.5px;
-  padding: 1px 6px 2px;
-  align-self: flex-start;
-  white-space: nowrap;
+#cam-id, #cam-level, #cam-location { cursor: pointer; }
+#cam-id:hover, #cam-level:hover, #cam-location:hover { color: #c2d48c; }
+
+/* Top Right */
+#hud-topright {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
 }
 
-#cam-id { cursor: pointer; }
-#cam-id:hover { color: #fff; }
+/* Bottom Left */
+#hud-bottomleft {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+}
 
-#hud-date, #hud-time { font-weight: normal; font-size: 12px; }
+#rec-status { font-size: 16px; }
 
-/* Contrôles flottants */
+/* ── Contrôles flottants ──────────────────────────────────────────────────── */
+
 #controls {
   position: fixed;
-  /* bottom/right gérés par positionOverlays() en JS */
   display: flex;
   align-items: center;
   gap: 10px;
@@ -66,44 +86,46 @@ html, body {
 
 #controls button, #controls select {
   background: rgba(0, 0, 0, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #aaa;
-  font-family: 'Courier New', monospace;
-  font-size: 14px;
-  padding: 6px 10px;
+  border: 1px solid rgba(154, 173, 106, 0.3);
+  color: #9aad6a;
+  font-family: 'VT323', monospace;
+  font-size: 16px;
+  padding: 5px 10px;
   cursor: pointer;
 }
 
-#controls button:hover { color: #fff; border-color: rgba(255,255,255,0.4); }
+#controls button:hover { color: #c2d48c; border-color: rgba(154,173,106,0.6); }
 
-#btn-rec { color: #cc3333; font-size: 18px; }
+#btn-rec { color: #6aad6a; font-size: 20px; }
 #btn-rec.recording { color: #ff4444; animation: rec-blink 1s steps(1) infinite; }
 
 @keyframes rec-blink {
   0%, 49% { opacity: 1; }
-  50%, 100% { opacity: 0.3; }
+  50%, 100% { opacity: 0.2; }
 }
 
 #ctrl-camera { display: flex; align-items: center; gap: 6px; }
 #camera-select { display: none; max-width: 200px; }
 #ctrl-camera.open #camera-select { display: block; }
 
-/* Toast */
+/* ── Toast ────────────────────────────────────────────────────────────────── */
+
 #toast {
   position: fixed;
   bottom: 60px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(0,0,0,0.8);
-  color: #aaa;
-  font-family: 'Courier New', monospace;
-  font-size: 11px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #9aad6a;
+  font-family: 'VT323', monospace;
+  font-size: 16px;
   letter-spacing: 1px;
-  padding: 6px 14px;
+  padding: 5px 14px;
   z-index: 30;
   opacity: 0;
   transition: opacity 0.3s;
   pointer-events: none;
+  white-space: nowrap;
 }
 
 #toast.show { opacity: 1; }

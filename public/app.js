@@ -1,13 +1,14 @@
 // Backrooms Cam — app.js
+// ── PARAMÈTRES (ajuster à chaud, puis rafraîchir) ────────────────────────────
 const FILTER = {
-  grain:      0.16,  // grain analogique
-  vignette:   0.55,  // vignette
-  scanlines:  0.28,  // scanlines CCTV
-  saturation: 0.40,  // désaturation globale (0=couleur, 1=gris total)
-  warmth:     0.15,
+  grain:      0.20,   // Film Grain 20%
+  vignette:   0.25,   // Vignette intensity 25%
+  scanlines:  0.10,   // Scanlines opacity 10%
+  saturation: 0.80,   // Désaturation 80% (monochrome)
+  warmth:     0.0,
 };
 
-// ── Shaders ──────────────────────────────────────────────────────────────────
+// ── Shaders ───────────────────────────────────────────────────────────────────
 
 const VERT_SRC = `
 attribute vec2 a_position;
@@ -26,96 +27,134 @@ uniform float u_grain;
 uniform float u_vignette;
 uniform float u_scanlines;
 uniform float u_saturation;
-uniform float u_warmth;
+uniform float u_jitter;
+uniform float u_glitch;
+uniform float u_glitch_line;
 varying vec2 v_texCoord;
 
 float rand(vec2 co) {
   return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
-float sCurve(float v) {
-  v = clamp(v, 0.0, 1.0);
-  return v * v * (3.0 - 2.0 * v);
-}
-
 void main() {
   vec2 uv = v_texCoord;
 
-  // Distorsion barrel légère (lentille caméra bon marché)
-  vec2 centered = uv - 0.5;
-  float dist = dot(centered, centered);
-  uv += centered * dist * 0.025;
+  // ── 1. Lens Distortion (0.03) ─────────────────────────────────────────────
+  vec2 c = uv - 0.5;
+  uv += c * dot(c, c) * 0.03;
+
+  // ── 2. Horizontal Jitter VHS (2px) ───────────────────────────────────────
+  float lineN = floor(uv.y * 240.0);
+  float jRand = rand(vec2(lineN, floor(u_time * 6.0)));
+  uv.x += step(0.94, jRand) * (rand(vec2(lineN, u_time)) - 0.5) * u_jitter * 0.008;
+
+  // ── 3. Glitch — Horizontal Tear ──────────────────────────────────────────
+  if (u_glitch > 0.5 && uv.y < u_glitch_line) {
+    uv.x += (rand(vec2(uv.y * 17.0, u_time * 50.0)) - 0.5) * 0.10;
+  }
 
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
     return;
   }
 
-  // Aberration chromatique horizontale (décalage luma/chroma VHS)
-  float ca = 0.0025;
+  // ── 4. Chromatic Aberration (0.002) ──────────────────────────────────────
+  float ca = 0.002;
   vec4 color;
-  color.r = texture2D(u_texture, uv + vec2(ca,  0.0)).r;
+  color.r = texture2D(u_texture, uv + vec2(ca, 0.0)).r;
   color.g = texture2D(u_texture, uv).g;
   color.b = texture2D(u_texture, uv - vec2(ca * 0.5, 0.0)).b;
   color.a = 1.0;
 
+  // ── 5. Gaussian Blur (1.5px edge softening) ───────────────────────────────
+  float bs = 0.0023;
+  vec4 blurred =
+    texture2D(u_texture, uv + vec2(-bs,-bs)) * 0.0625 +
+    texture2D(u_texture, uv + vec2(0.0,-bs)) * 0.125  +
+    texture2D(u_texture, uv + vec2( bs,-bs)) * 0.0625 +
+    texture2D(u_texture, uv + vec2(-bs,0.0)) * 0.125  +
+    texture2D(u_texture, uv              )  * 0.25   +
+    texture2D(u_texture, uv + vec2( bs,0.0)) * 0.125  +
+    texture2D(u_texture, uv + vec2(-bs, bs)) * 0.0625 +
+    texture2D(u_texture, uv + vec2(0.0, bs)) * 0.125  +
+    texture2D(u_texture, uv + vec2( bs, bs)) * 0.0625;
+  color.rgb = mix(color.rgb, blurred.rgb, 0.55);
+
+  // ── 6. Ghosting (5%) + Motion Smear (3%) ─────────────────────────────────
+  vec3 ghost = texture2D(u_texture, uv + vec2(0.005, 0.0)).rgb;
+  color.rgb  = mix(color.rgb, ghost, 0.05);
+  vec3 smear = texture2D(u_texture, uv + vec2(0.003, 0.001)).rgb;
+  color.rgb  = mix(color.rgb, smear, 0.03);
+
+  // ── 7. JPEG Block Artifacts (medium) ─────────────────────────────────────
+  float bw = 1.0 / 80.0;
+  float bh = 1.0 / 60.0;
+  vec2  blockUV  = (floor(uv / vec2(bw, bh)) + 0.5) * vec2(bw, bh);
+  float blockRnd = rand(vec2(floor(uv.x / bw), floor(uv.y / bh)));
+  color.rgb = mix(color.rgb, texture2D(u_texture, blockUV).rgb, 0.10);
+  color.rgb += (blockRnd - 0.5) * 0.025;
+
+  // ── 8. Shadow Crush (+15%) ───────────────────────────────────────────────
+  color.rgb = max(color.rgb - vec3(0.038), vec3(0.0)) / (1.0 - 0.038);
+
+  // ── 9. Highlight Clip (+20%) ─────────────────────────────────────────────
+  color.rgb = min(color.rgb, vec3(0.85)) / 0.85;
+
+  // ── 10. Brightness -10%, Contrast +20%, Gamma 0.9 ────────────────────────
+  color.rgb *= 0.90;
+  color.rgb  = (color.rgb - 0.5) * 1.20 + 0.5;
+  color.rgb  = clamp(color.rgb, 0.0, 1.0);
+  color.rgb  = pow(color.rgb, vec3(1.0 / 0.9));
+
+  // ── 11. Désaturation -80% (monochrome) ───────────────────────────────────
   float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-  vec3 gray  = vec3(luma);
+  color.rgb  = mix(vec3(luma), color.rgb, 1.0 - u_saturation);
 
-  // ── Désaturation sélective (palette Backrooms) ────────────────────────────
-  // Rouges/oranges → gris (peaux, teintes chaudes non-jaunes)
-  float redness  = max(0.0, color.r - max(color.g, color.b));
-  // Cyans/bleus → gris (les backrooms n'ont pas de bleu froid)
-  float cyanblue = max(0.0, color.b - color.r * 0.8);
-  color.rgb = mix(color.rgb, gray, clamp(redness  * 5.0, 0.0, 0.88));
-  color.rgb = mix(color.rgb, gray, clamp(cyanblue * 4.0, 0.0, 0.90));
+  // ── 12. Tint Backrooms #7B8D4D / #C5B76E (Green/Yellow) ──────────────────
+  // Tint normalisé (max canal = 1.0) : #7B8D4D → (0.872, 1.0, 0.546)
+  vec3 tintDark  = vec3(0.872, 1.000, 0.546);  // ombres (#7B8D4D norm)
+  vec3 tintLight = vec3(0.990, 0.972, 0.703);  // hautes lumières (#C5B76E norm)
+  vec3 tint      = mix(tintDark, tintLight, luma);
+  color.rgb = mix(color.rgb, color.rgb * tint, 0.72);
+  color.rgb = clamp(color.rgb, 0.0, 1.0);
 
-  // ── Désaturation globale modérée — conserver les jaunes! ─────────────────
-  // (Lightroom: Vibrance -45, Sat -30 → ~55% de sat résiduelle)
-  luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-  gray = vec3(luma);
-  color.rgb = mix(gray, color.rgb, 1.0 - u_saturation);
+  // ── 13. Bloom (threshold 0.8, intensity 0.3) ─────────────────────────────
+  float bright = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+  float bloomF = max(0.0, bright - 0.8) * 5.0;
+  float bls    = 0.007;
+  vec3 bloomS  = (
+    texture2D(u_texture, uv + vec2( bls, 0.0)).rgb +
+    texture2D(u_texture, uv - vec2( bls, 0.0)).rgb +
+    texture2D(u_texture, uv + vec2(0.0,  bls)).rgb +
+    texture2D(u_texture, uv - vec2(0.0,  bls)).rgb
+  ) * 0.25;
+  bloomS       = mix(bloomS, bloomS * tint, 0.72);
+  color.rgb   += bloomS * bloomF * 0.30;
 
-  // ── Cast chaud jaune-ambre (signature Backrooms) ──────────────────────────
-  // Fluorescent incandescent : boost R+G, réduction forte du bleu
-  color.r *= 1.06;
-  color.g *= 1.01;
-  color.b *= 0.72;
-  // Normaliser pour éviter le clipping
-  float mx = max(color.r, max(color.g, color.b));
-  if (mx > 1.0) color.rgb /= mx;
-
-  // ── Courbe tonale caméra de surveillance ──────────────────────────────────
-  // Noirs légèrement levés (pas de vrai noir sur un capteur CCD bon marché)
-  color.rgb = color.rgb * 0.92 + 0.03;
-  // Contraste via S-curve
-  color.rgb = vec3(
-    sCurve(color.rgb.r * 1.16 - 0.07),
-    sCurve(color.rgb.g * 1.16 - 0.07),
-    sCurve(color.rgb.b * 1.16 - 0.07)
-  );
-
-  // ── Highlight rolloff (capteur saturé) ───────────────────────────────────
-  color.rgb = color.rgb / (color.rgb + vec3(0.20)) * 1.20;
-
-  // ── Bandes de tracking VHS (bruit horizontal animé) ──────────────────────
-  float trackY   = floor(uv.y * 75.0 + u_time * 5.0);
-  float tracking = rand(vec2(trackY, u_time * 0.2)) * 0.020;
+  // ── 14. Tracking bands VHS ───────────────────────────────────────────────
+  float trackY   = floor(uv.y * 80.0 + u_time * 5.0);
+  float tracking = rand(vec2(trackY, u_time * 0.2)) * 0.018;
   color.rgb += tracking * (1.0 - luma) * 0.5;
 
-  // ── Scanlines CCTV fines ──────────────────────────────────────────────────
-  float scanline = sin(uv.y * 560.0 * 3.14159) * 0.5 + 0.5;
-  color.rgb *= 1.0 - u_scanlines * (1.0 - scanline) * 0.55;
+  // ── 15. Scanlines (10% opacité, spacing 3px à 480 lignes) ────────────────
+  float sl     = step(3.0, mod(uv.y * 480.0, 4.0));
+  color.rgb   *= 1.0 - sl * u_scanlines;
 
-  // ── Grain analogique (capteur CCD — plus fort dans les ombres) ───────────
-  float noise = rand(uv * vec2(1366.0, 768.0) + fract(u_time * 17.3)) - 0.5;
-  float shadowBoost = 1.0 + (1.0 - luma) * 1.4;
-  color.rgb += noise * u_grain * shadowBoost;
+  // ── 16. Film Grain 20% monochrome animé ──────────────────────────────────
+  float noise  = rand(uv * vec2(640.0, 480.0) + fract(u_time * 23.7)) - 0.5;
+  float shBoost= 1.0 + (1.0 - luma) * 1.2;
+  color.rgb   += vec3(noise) * u_grain * shBoost;
 
-  // ── Vignette ──────────────────────────────────────────────────────────────
-  vec2 v = uv * (1.0 - uv.yx);
-  float vig = pow(v.x * v.y * 15.0, u_vignette);
+  // ── 17. Vignette (25%, feather 70%) ──────────────────────────────────────
+  float vd   = length(uv - 0.5) / 0.7071;
+  float vig  = 1.0 - smoothstep(0.3, 1.0, vd) * u_vignette;
   color.rgb *= vig;
+
+  // ── 18. Glitch Static Burst ───────────────────────────────────────────────
+  if (u_glitch > 0.5) {
+    float st = rand(vec2(uv.x * 200.0 + u_time * 500.0, uv.y * 200.0));
+    if (st > 0.88) color.rgb = vec3(st * tint);
+  }
 
   gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), 1.0);
 }`;
@@ -123,11 +162,11 @@ void main() {
 // ── WebGL setup ───────────────────────────────────────────────────────────────
 
 const canvas = document.getElementById('canvas');
-const gl     = canvas.getContext('webgl', { preserveDrawingBuffer: true });  // requis pour captureStream
+const gl     = canvas.getContext('webgl', { preserveDrawingBuffer: true });
 const video  = document.getElementById('video');
 
 if (!gl) {
-  document.getElementById('toast').textContent = 'WebGL non disponible — activer WebGL dans le navigateur';
+  document.getElementById('toast').textContent = 'WebGL non disponible';
   document.getElementById('toast').classList.add('show');
   throw new Error('WebGL not supported');
 }
@@ -149,7 +188,6 @@ if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
   throw new Error(gl.getProgramInfoLog(prog));
 gl.useProgram(prog);
 
-// Quad plein écran (2 triangles)
 const QUAD = new Float32Array([
   -1,-1, 0,1,   1,-1, 1,1,   -1,1, 0,0,
   -1, 1, 0,0,   1,-1, 1,1,    1,1, 1,0,
@@ -165,22 +203,24 @@ gl.enableVertexAttribArray(aTex);
 gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
 gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 16, 8);
 
-// Uniforms
 const uTime       = gl.getUniformLocation(prog, 'u_time');
 const uGrain      = gl.getUniformLocation(prog, 'u_grain');
 const uVignette   = gl.getUniformLocation(prog, 'u_vignette');
 const uScanlines  = gl.getUniformLocation(prog, 'u_scanlines');
 const uSaturation = gl.getUniformLocation(prog, 'u_saturation');
-const uWarmth     = gl.getUniformLocation(prog, 'u_warmth');
+const uJitter     = gl.getUniformLocation(prog, 'u_jitter');
+const uGlitch     = gl.getUniformLocation(prog, 'u_glitch');
+const uGlitchLine = gl.getUniformLocation(prog, 'u_glitch_line');
 
 gl.uniform1f(uGrain,      FILTER.grain);
 gl.uniform1f(uVignette,   FILTER.vignette);
 gl.uniform1f(uScanlines,  FILTER.scanlines);
 gl.uniform1f(uSaturation, FILTER.saturation);
-gl.uniform1f(uWarmth,     FILTER.warmth);
+gl.uniform1f(uJitter,     1.0);
+gl.uniform1f(uGlitch,     0.0);
+gl.uniform1f(uGlitchLine, 0.5);
 gl.clearColor(0, 0, 0, 1);
 
-// Texture webcam
 const texture = gl.createTexture();
 gl.bindTexture(gl.TEXTURE_2D, texture);
 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -239,13 +279,11 @@ document.getElementById('camera-select').addEventListener('change', e => {
   startCamera(e.target.value).catch(err => showToast(`Erreur caméra : ${err.message}`));
 });
 
-// ── Boucle de rendu ───────────────────────────────────────────────────────────
+// ── Viewport 4:3 forcé ────────────────────────────────────────────────────────
 
 function updateViewport() {
   const cw = canvas.width, ch = canvas.height;
-  const vw = video.videoWidth  || cw;
-  const vh = video.videoHeight || ch;
-  const camRatio = vw / vh;
+  const camRatio = 4 / 3;  // Output 4:3 (640x480)
   const winRatio = cw / ch;
   let vpX, vpY, vpW, vpH;
   if (winRatio > camRatio) {
@@ -266,30 +304,52 @@ function positionOverlays() {
   hud.style.top    = vpRect.y + 'px';
   hud.style.width  = vpRect.w + 'px';
   hud.style.height = vpRect.h + 'px';
-
-  // Contrôles : 20px depuis le coin bas-droit de la zone vidéo
   const ctrl = document.getElementById('controls');
   ctrl.style.right  = (canvas.width  - vpRect.x - vpRect.w + 20) + 'px';
   ctrl.style.bottom = (canvas.height - vpRect.y - vpRect.h + 20) + 'px';
 }
 
 function resize() {
-  canvas.width  = window.innerWidth  & ~1;  // toujours pair (libx264)
+  canvas.width  = window.innerWidth  & ~1;
   canvas.height = window.innerHeight & ~1;
   updateViewport();
 }
 window.addEventListener('resize', resize);
 resize();
 
-function render(time) {
+// ── Render loop 15 FPS ───────────────────────────────────────────────────────
+
+const TARGET_FPS    = 15;
+const FRAME_MS      = 1000 / TARGET_FPS;
+let   lastFrameTime = 0;
+
+function render(now) {
+  requestAnimationFrame(render);
+  if (now - lastFrameTime < FRAME_MS) return;
+  lastFrameTime = now;
   gl.clear(gl.COLOR_BUFFER_BIT);
   if (video.readyState >= 2) {
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
-    gl.uniform1f(uTime, time * 0.001);
+    gl.uniform1f(uTime, now * 0.001);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
-  requestAnimationFrame(render);
+}
+
+// ── Glitch system (every 5–20 s, 1–3 frames) ─────────────────────────────────
+
+function triggerGlitch() {
+  gl.uniform1f(uGlitch,     1.0);
+  gl.uniform1f(uGlitchLine, Math.random());
+  const duration = (Math.floor(Math.random() * 3) + 1) * FRAME_MS;
+  setTimeout(() => {
+    gl.uniform1f(uGlitch, 0.0);
+    scheduleGlitch();
+  }, duration);
+}
+
+function scheduleGlitch() {
+  setTimeout(triggerGlitch, (Math.random() * 15 + 5) * 1000);
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -299,8 +359,9 @@ function render(time) {
     await startCamera(currentDeviceId);
     await populateCameraList();
     requestAnimationFrame(render);
+    scheduleGlitch();
   } catch (err) {
-    showToast(`Erreur : ${err.message || 'Impossible d\'accéder à la caméra'}`, 8000);
+    showToast(`Erreur : ${err.message || "Impossible d'accéder à la caméra"}`, 8000);
   }
 })();
 
@@ -312,47 +373,36 @@ function updateHUD() {
   const d  = new Date();
   const mm = pad(d.getMonth() + 1), dd = pad(d.getDate()), yyyy = d.getFullYear();
   const hh = pad(d.getHours()), mi = pad(d.getMinutes()), ss = pad(d.getSeconds());
-  const cs = pad(Math.floor(d.getMilliseconds() / 10));
   document.getElementById('hud-date').textContent = `${mm}/${dd}/${yyyy}`;
-  document.getElementById('hud-time').textContent = `${hh}:${mi}:${ss}.${cs}`;
+  document.getElementById('hud-time').textContent = `${hh}:${mi}:${ss}`;
 }
-setInterval(updateHUD, 50);
+setInterval(updateHUD, 1000);
 updateHUD();
 
-// Identifiant caméra — restaurer depuis localStorage
-const camIdEl = document.getElementById('cam-id');
-camIdEl.textContent = localStorage.getItem('camId') || 'CAM-01';
+function makeEditable(elId, storageKey, defaultVal) {
+  const el = document.getElementById(elId);
+  el.textContent = localStorage.getItem(storageKey) || defaultVal;
+  el.addEventListener('click', () => {
+    const cur = el.textContent;
+    const inp = document.createElement('input');
+    inp.value = cur;
+    inp.style.cssText = 'background:transparent;border:none;border-bottom:1px solid #9aad6a;color:inherit;font:inherit;letter-spacing:inherit;outline:none;width:200px;';
+    el.textContent = '';
+    el.appendChild(inp);
+    inp.focus(); inp.select();
+    const save = () => {
+      const val = inp.value.trim() || cur;
+      el.textContent = val;
+      localStorage.setItem(storageKey, val);
+    };
+    inp.addEventListener('blur', save);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+  });
+}
 
-camIdEl.addEventListener('click', () => {
-  const current = camIdEl.textContent;
-  const input   = document.createElement('input');
-  input.value   = current;
-  input.style.cssText = [
-    'background:transparent',
-    'border:none',
-    'border-bottom:1px solid #aaa',
-    'color:#ddddc8',
-    'font-family:inherit',
-    'font-size:inherit',
-    'font-weight:bold',
-    'letter-spacing:1.5px',
-    'outline:none',
-    'width:180px',
-  ].join(';');
-
-  camIdEl.textContent = '';
-  camIdEl.appendChild(input);
-  input.focus();
-  input.select();
-
-  function save() {
-    const val = input.value.trim() || current;
-    camIdEl.textContent = val;
-    localStorage.setItem('camId', val);
-  }
-  input.addEventListener('blur', save);
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
-});
+makeEditable('cam-id',       'camId',       'CAMERA 07');
+makeEditable('cam-level',    'camLevel',    'LEVEL 2');
+makeEditable('cam-location', 'camLocation', 'THE BACKROOMS');
 
 // ── Contrôles flottants ───────────────────────────────────────────────────────
 
@@ -368,7 +418,6 @@ function showControls() {
 document.addEventListener('mousemove', showControls);
 document.addEventListener('touchstart', showControls);
 
-// Sélecteur caméra (toggle)
 document.getElementById('btn-camera').addEventListener('click', () => {
   document.getElementById('ctrl-camera').classList.toggle('open');
   clearTimeout(hideTimer);
@@ -379,16 +428,11 @@ document.getElementById('btn-camera').addEventListener('click', () => {
 let mediaRecorder = null;
 let recChunks     = [];
 const btnRec      = document.getElementById('btn-rec');
+const recStatus   = document.getElementById('rec-status');
 
 async function saveRecording() {
   const blob = new Blob(recChunks, { type: 'video/webm' });
-  console.log(`[REC] chunks: ${recChunks.length}, blob: ${blob.size} bytes`);
-
-  if (blob.size < 1000) {
-    showToast(`Enregistrement vide (${blob.size} octets) — WebGL preserveDrawingBuffer?`, 7000);
-    return;
-  }
-
+  if (blob.size < 1000) { showToast('Enregistrement vide', 5000); return; }
   showToast('Conversion en cours…');
   try {
     const res  = await fetch('/save-recording', {
@@ -400,35 +444,32 @@ async function saveRecording() {
     if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
     showToast(`✓ Enregistré : ${data.filename}`);
   } catch (err) {
-    console.error('[REC] erreur:', err);
     showToast(`Erreur : ${err.message}`, 8000);
   }
 }
 
 function startRecording() {
-  const stream   = canvas.captureStream(30);
+  const stream   = canvas.captureStream(TARGET_FPS);
   const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-    ? 'video/webm;codecs=vp9'
-    : 'video/webm';
+    ? 'video/webm;codecs=vp9' : 'video/webm';
   mediaRecorder = new MediaRecorder(stream, { mimeType });
   recChunks     = [];
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
   mediaRecorder.onstop          = saveRecording;
   mediaRecorder.start(1000);
   btnRec.classList.add('recording');
+  recStatus.textContent = 'STATUS: RECORDING';
   showToast('⏺ Enregistrement démarré');
 }
 
 function stopRecording() {
   mediaRecorder.stop();
   btnRec.classList.remove('recording');
+  recStatus.textContent = 'STATUS: MONITORING';
 }
 
 btnRec.addEventListener('click', () => {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    stopRecording();
-  } else {
-    startRecording();
-  }
+  if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
+  else startRecording();
   showControls();
 });
