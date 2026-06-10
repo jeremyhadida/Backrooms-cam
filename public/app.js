@@ -165,6 +165,23 @@ const canvas = document.getElementById('canvas');
 const gl     = canvas.getContext('webgl', { preserveDrawingBuffer: true });
 const video  = document.getElementById('video');
 
+// ── Modes : 'cam' | 'backrooms' | 'backcam' ──────────────────────────────────
+let mode          = 'cam';
+let camSubMode    = 'live';   // 'live' | 'incrustation' (utilisé en mode backcam)
+let seqTimer      = null;
+let segmenter     = null;
+let segmenterReady = false;
+
+const backgrounds     = [];   // tableau d'Images chargées
+let   activeBackground = null;
+
+const compositeCanvas = document.createElement('canvas');
+const compositeCtx    = compositeCanvas.getContext('2d');
+const personCanvas    = document.createElement('canvas');
+const personCtx       = personCanvas.getContext('2d');
+const maskCanvas      = document.createElement('canvas');
+const maskCtx         = maskCanvas.getContext('2d');
+
 if (!gl) {
   document.getElementById('toast').textContent = 'WebGL non disponible';
   document.getElementById('toast').classList.add('show');
@@ -235,6 +252,140 @@ function showToast(msg, duration = 4000) {
   setTimeout(() => toast.classList.remove('show'), duration);
 }
 
+// ── Backgrounds ───────────────────────────────────────────────────────────────
+
+function initDefaultBackground() {
+  const img = new Image();
+  img.onload = () => { if (!activeBackground) activeBackground = img; };
+  img.src = '/backrooms.jpg';
+  backgrounds.push(img);
+}
+
+function pickBackground() {
+  const loaded = backgrounds.filter(b => b.complete && b.naturalWidth);
+  if (!loaded.length) return;
+  activeBackground = loaded[Math.floor(Math.random() * loaded.length)];
+}
+
+function resetBackgrounds() {
+  backgrounds.length = 0;
+  activeBackground = null;
+  initDefaultBackground();
+  showToast('Fonds réinitialisés', 2000);
+}
+
+// ── MediaPipe Selfie Segmentation ─────────────────────────────────────────────
+
+async function initMediaPipe() {
+  try {
+    const { ImageSegmenter, FilesetResolver } = await import(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs'
+    );
+    const filesetResolver = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+    );
+    segmenter = await ImageSegmenter.createFromOptions(filesetResolver, {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+        delegate: 'GPU'
+      },
+      outputCategoryMask: true,
+      runningMode: 'VIDEO'
+    });
+    segmenterReady = true;
+    if (mode === 'backcam') startBackcamSequence();
+    else if (mode === 'backrooms') pickBackground();
+  } catch (err) {
+    console.error('MediaPipe init:', err);
+  }
+}
+
+function buildCompositeFrame(video, vpW, vpH) {
+  if (!segmenterReady || !activeBackground?.complete) return null;
+  if (compositeCanvas.width !== vpW || compositeCanvas.height !== vpH) {
+    compositeCanvas.width = vpW; compositeCanvas.height = vpH;
+  }
+  if (personCanvas.width !== vpW || personCanvas.height !== vpH) {
+    personCanvas.width = vpW; personCanvas.height = vpH;
+  }
+  try {
+    const result = segmenter.segmentForVideo(video, performance.now());
+    if (!result?.categoryMask) return null;
+
+    const mw   = result.categoryMask.width;
+    const mh   = result.categoryMask.height;
+    const mask = result.categoryMask.getAsFloat32Array();
+
+    if (maskCanvas.width !== mw || maskCanvas.height !== mh) {
+      maskCanvas.width = mw; maskCanvas.height = mh;
+    }
+    const maskData = maskCtx.createImageData(mw, mh);
+    for (let i = 0; i < mask.length; i++) {
+      const a = mask[i] <= 0.5 ? 255 : 0;
+      maskData.data[i * 4] = maskData.data[i * 4 + 1] = maskData.data[i * 4 + 2] = 255;
+      maskData.data[i * 4 + 3] = a;
+    }
+    maskCtx.putImageData(maskData, 0, 0);
+
+    personCtx.clearRect(0, 0, vpW, vpH);
+    personCtx.drawImage(video, 0, 0, vpW, vpH);
+    personCtx.globalCompositeOperation = 'destination-in';
+    personCtx.drawImage(maskCanvas, 0, 0, vpW, vpH);
+    personCtx.globalCompositeOperation = 'source-over';
+
+    compositeCtx.drawImage(activeBackground, 0, 0, vpW, vpH);
+    compositeCtx.drawImage(personCanvas, 0, 0);
+
+    result.close();
+    return compositeCanvas;
+  } catch {
+    return null;
+  }
+}
+
+function glitchTransition(cb) {
+  gl.uniform1f(uGlitch,     1.0);
+  gl.uniform1f(uGlitchLine, Math.random());
+  cb();
+  setTimeout(() => gl.uniform1f(uGlitch, 0.0), FRAME_MS * 3);
+}
+
+function scheduleNextIncrustation() {
+  const delay = (Math.random() * 10 + 10) * 1000; // 10–20 s
+  seqTimer = setTimeout(() => {
+    pickBackground();
+    glitchTransition(() => { camSubMode = 'incrustation'; });
+    seqTimer = setTimeout(() => {
+      glitchTransition(() => {
+        camSubMode = 'live';
+        scheduleNextIncrustation();
+      });
+    }, 3000);
+  }, delay);
+}
+
+function startBackcamSequence() {
+  clearTimeout(seqTimer);
+  camSubMode = 'live';
+  scheduleNextIncrustation();
+}
+
+function setMode(newMode) {
+  if ((newMode === 'backrooms' || newMode === 'backcam') && !segmenterReady) {
+    showToast('Segmentation en chargement…', 3000);
+    return;
+  }
+  mode = newMode;
+  document.getElementById('btn-mode-cam').classList.toggle('active', mode === 'cam');
+  document.getElementById('btn-mode-backrooms').classList.toggle('active', mode === 'backrooms');
+  document.getElementById('btn-mode-backcam').classList.toggle('active', mode === 'backcam');
+  document.getElementById('ctrl-fond').classList.toggle('visible', mode !== 'cam');
+  clearTimeout(seqTimer);
+  camSubMode = 'live';
+  if (mode === 'backcam') startBackcamSequence();
+  else if (mode === 'backrooms') pickBackground();
+}
+
 // ── Canvas 2D de composition (WebGL + HUD) pour l'enregistrement ─────────────
 
 const recCanvas = document.createElement('canvas');
@@ -248,7 +399,7 @@ function syncRecCanvas() {
 function hudLabel(ctx, text, x, y) {
   const W = ctx.measureText(text).width + 10;
   ctx.fillStyle = 'rgba(0,0,0,0.80)';
-  ctx.fillRect(x, y, W, 24);
+  ctx.fillRect(x, y, W, 48);
   ctx.fillStyle = '#9aad6a';
   ctx.textAlign = 'left';
   ctx.fillText(text, x + 5, y + 2);
@@ -265,11 +416,11 @@ function hudLabelRight(ctx, text, rx, y) {
 }
 
 function drawHUDOnCanvas(ctx) {
-  ctx.font         = '18px "VT323", monospace';
+  ctx.font         = '36px "VT323", monospace';
   ctx.textBaseline = 'top';
   const { x: vx, y: vy, w: vw, h: vh } = vpRect;
   const pad  = 10;
-  const line = 24;
+  const line = 48;
 
   // Top-left : cam-id / cam-level / cam-location
   hudLabel(ctx, document.getElementById('cam-id')?.textContent       || 'CAMERA 07',     vx + pad, vy + pad);
@@ -360,9 +511,14 @@ function positionOverlays() {
   hud.style.top    = vpRect.y + 'px';
   hud.style.width  = vpRect.w + 'px';
   hud.style.height = vpRect.h + 'px';
+  const bottomOffset = (canvas.height - vpRect.y - vpRect.h + 20) + 'px';
   const ctrl = document.getElementById('controls');
-  ctrl.style.right  = (canvas.width  - vpRect.x - vpRect.w + 20) + 'px';
-  ctrl.style.bottom = (canvas.height - vpRect.y - vpRect.h + 20) + 'px';
+  ctrl.style.right  = (canvas.width - vpRect.x - vpRect.w + 20) + 'px';
+  ctrl.style.bottom = bottomOffset;
+  const mt = document.getElementById('mode-toggle');
+  mt.style.left      = (vpRect.x + Math.round(vpRect.w / 2)) + 'px';
+  mt.style.transform = 'translateX(-50%)';
+  mt.style.bottom    = bottomOffset;
 }
 
 function resize() {
@@ -389,7 +545,13 @@ function render(now) {
   gl.clear(gl.COLOR_BUFFER_BIT);
   if (video.readyState >= 2) {
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+    let frame = null;
+    if (mode === 'backrooms' && segmenterReady) {
+      frame = buildCompositeFrame(video, vpRect.w, vpRect.h);
+    } else if (mode === 'backcam' && camSubMode === 'incrustation' && segmenterReady) {
+      frame = buildCompositeFrame(video, vpRect.w, vpRect.h);
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame || video);
     gl.uniform1f(uTime, now * 0.001);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     if (isRecording) compositeFrame();
@@ -420,6 +582,8 @@ function scheduleGlitch() {
     await populateCameraList();
     requestAnimationFrame(render);
     scheduleGlitch();
+    initDefaultBackground();
+    initMediaPipe();
   } catch (err) {
     showToast(`Erreur : ${err.message || "Impossible d'accéder à la caméra"}`, 8000);
   }
@@ -471,8 +635,12 @@ let hideTimer  = null;
 
 function showControls() {
   controls.classList.add('visible');
+  document.getElementById('mode-toggle').classList.add('visible');
   clearTimeout(hideTimer);
-  hideTimer = setTimeout(() => controls.classList.remove('visible'), 3000);
+  hideTimer = setTimeout(() => {
+    controls.classList.remove('visible');
+    document.getElementById('mode-toggle').classList.remove('visible');
+  }, 3000);
 }
 
 document.addEventListener('mousemove', showControls);
@@ -481,6 +649,27 @@ document.addEventListener('touchstart', showControls);
 document.getElementById('btn-camera').addEventListener('click', () => {
   document.getElementById('ctrl-camera').classList.toggle('open');
   clearTimeout(hideTimer);
+});
+
+document.getElementById('btn-fond').addEventListener('click', () => {
+  document.getElementById('fond-input').click();
+  clearTimeout(hideTimer);
+});
+
+document.getElementById('fond-input').addEventListener('change', e => {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  files.forEach(file => {
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+    backgrounds.push(img);
+  });
+  showToast(`${files.length} fond(s) ajouté(s) — total : ${backgrounds.length}`, 3000);
+  e.target.value = '';
+});
+
+document.getElementById('btn-fond-reset').addEventListener('click', () => {
+  resetBackgrounds();
 });
 
 // ── Enregistrement ────────────────────────────────────────────────────────────

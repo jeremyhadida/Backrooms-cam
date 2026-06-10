@@ -28,7 +28,7 @@ html, body {
   display: inline-block;
   background: rgba(0, 0, 0, 0.80);
   color: #9aad6a;        /* olive green — #7B8D4D éclairci pour lisibilité */
-  font-size: 18px;
+  font-size: 36px;
   letter-spacing: 1px;
   padding: 0px 5px 1px;
   align-self: flex-start;
@@ -68,7 +68,7 @@ html, body {
   left: 10px;
 }
 
-#rec-status { font-size: 16px; }
+#rec-status { font-size: 32px; }
 
 /* ── Contrôles flottants ──────────────────────────────────────────────────── */
 
@@ -89,14 +89,14 @@ html, body {
   border: 1px solid rgba(154, 173, 106, 0.3);
   color: #9aad6a;
   font-family: 'VT323', monospace;
-  font-size: 16px;
+  font-size: 32px;
   padding: 5px 10px;
   cursor: pointer;
 }
 
 #controls button:hover { color: #c2d48c; border-color: rgba(154,173,106,0.6); }
 
-#btn-rec { color: #6aad6a; font-size: 20px; }
+#btn-rec { color: #6aad6a; font-size: 40px; }
 #btn-rec.recording { color: #ff4444; animation: rec-blink 1s steps(1) infinite; }
 
 @keyframes rec-blink {
@@ -108,6 +108,42 @@ html, body {
 #camera-select { display: none; max-width: 200px; }
 #ctrl-camera.open #camera-select { display: block; }
 
+#ctrl-fond { display: none; align-items: center; gap: 6px; }
+#ctrl-fond.visible { display: flex; }
+#fond-input { display: none; }
+
+/* ── Toggle de mode (CAM / BACKROOMS) ────────────────────────────────────── */
+
+#mode-toggle {
+  position: fixed;
+  display: flex;
+  gap: 6px;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+#mode-toggle.visible { opacity: 1; }
+
+.mode-btn {
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(154, 173, 106, 0.3);
+  color: #9aad6a;
+  font-family: 'VT323', monospace;
+  font-size: 30px;
+  letter-spacing: 1px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.mode-btn:hover { color: #c2d48c; border-color: rgba(154,173,106,0.6); }
+
+.mode-btn.active {
+  background: rgba(154, 173, 106, 0.18);
+  border-color: rgba(154, 173, 106, 0.8);
+  color: #c2d48c;
+}
+
 /* ── Toast ────────────────────────────────────────────────────────────────── */
 
 #toast {
@@ -118,7 +154,7 @@ html, body {
   background: rgba(0, 0, 0, 0.85);
   color: #9aad6a;
   font-family: 'VT323', monospace;
-  font-size: 16px;
+  font-size: 32px;
   letter-spacing: 1px;
   padding: 5px 14px;
   z-index: 30;

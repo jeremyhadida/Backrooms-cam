@@ -31,11 +31,23 @@
     </div>
   </div>
 
+  <!-- Toggle de mode -->
+  <div id="mode-toggle">
+    <button id="btn-mode-cam" class="mode-btn active" onclick="setMode('cam')">CAM</button>
+    <button id="btn-mode-backrooms" class="mode-btn" onclick="setMode('backrooms')">BACKROOMS</button>
+    <button id="btn-mode-backcam" class="mode-btn" onclick="setMode('backcam')">BACKCAM</button>
+  </div>
+
   <!-- Contrôles flottants -->
   <div id="controls">
     <div id="ctrl-camera">
       <button id="btn-camera" title="Changer de caméra">⚙</button>
       <select id="camera-select"></select>
+    </div>
+    <div id="ctrl-fond">
+      <button id="btn-fond" title="Choisir une image de fond">FOND</button>
+      <button id="btn-fond-reset" title="Réinitialiser le fond">↺</button>
+      <input type="file" id="fond-input" accept="image/*" multiple>
     </div>
     <button id="btn-rec" title="Enregistrer">⏺</button>
   </div>
@@ -46,6 +58,6 @@
   <!-- Vidéo source (masquée) -->
   <video id="video" playsinline muted></video>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>
